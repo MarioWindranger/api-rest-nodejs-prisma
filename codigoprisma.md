@@ -234,6 +234,7 @@ Por ejemplo:
 - Página 1 → usuarios 1 al 20
 - Página 2 → usuarios 21 al 40
 - Página 3 → usuarios 41 al 60
+
 Con esto estaríamos empaquetando los registros en páginas para poder enviarselos al usuario, sin tener que recurrir a excesos. Así el cliente solicita solo la porción de datos que necesita.
 Piensa en un libro de 1000 páginas.
 Cuando lo lees, no intentas leer las 1000 páginas al mismo tiempo.
@@ -241,6 +242,7 @@ Lees:
 - Página 1
 - Página 2
 - Página 3
+
 La paginación en una API funciona igual.
 
 ### ¿Cómo se hace esto en Prisma?
@@ -314,10 +316,226 @@ const users = await prisma.user.findMany({
   take: 10,
 })
 ```
-cursor va a ser un objeto que va a especificar, usando el id, por que registro vas a empezar para mostarar tus registros. La idea es: **"Dame los siguientes 10 usuarios después del usuario con id 20"**. Esto suele ser más eficiente que usar skip cuando existen millones de registros, porque la base de datos no tiene que contar y saltarse tantas filas, ya que el skip está determinado por una fórmula matemática que depende del número de página que desee ver el cliente.  
+cursor va a ser un objeto que va a especificar, usando el id, por cual id vas a empezar para mostrar tus registros. La idea es: **"Dame los siguientes 10 usuarios después del usuario con id 20"**. Esto suele ser más eficiente que usar skip cuando existen millones de registros, porque la base de datos no tiene que contar y saltarse tantas filas, ya que el skip está determinado por una fórmula matemática que depende del número de página que desee ver el cliente.  
 
 ### Resumen:
-La paginación es simplemente: "No me envíes todos los registros; envíame solo una parte." Con Prisma normalmente se hace con skip y take. Si hay conjuntos de datos muy grandes usas curosr y take. **El objetivo principal es mejorar el rendimiento de la API y reducir la cantidad de datos transferidos.**
+La paginación es simplemente: "No me envíes todos los registros; envíame solo una parte." Con Prisma normalmente se hace con skip y take. Si hay conjuntos de datos muy grandes usas cursor y take. **El objetivo principal es mejorar el rendimiento de la API y reducir la cantidad de datos transferidos.**
+
+## Indices
+Imagina que tienes un libro de 500 páginas y deseas buscar las veces que aparece la palabra "enzimas" en el libro. Sí el libro no tuviera un índice, tendrías que revisar página por página para poder encontrar la palabra "enzimas". Eso es lo que hace una base de datos cuando no tiene índice, revisa fila por fila hasta encontrar lo que le pedistes.
+
+Con un índice al final del libro tienes una lista ordenada alfabéticamente que te dice exactamente en qué páginas aparece cada palabra. La base de datos haría lo mismo con un índice: mantiene una estructura ordenada separada que le permite encontrar registros en milisegundos (almacenados en nuestro disco duro) en lugar de revisar toda la tabla. Así es como funciona en tu disco duro:
+
+### 1. Dos archivos distintos en el disco
+Imagina que tienes una tabla llamada usuarios con 1 millón de filas y columnas como id, nombre, email y edad.
+
+- El archivo de la Tabla (El "Heap"): Postgres guarda toda la información de la tabla en un archivo en tu disco duro. **Los datos están ordenados según llegaron** (un caos para buscar).
+
+- El archivo del Índice: Si creas un índice en la columna email, Postgres crea un nuevo archivo independiente en el disco duro.
+
+- Ejemplo: 
+```
+Sin índice:  SELECT * FROM usuarios WHERE email = 'ana@mail.com'
+             → revisa 1,000,000 filas una por una
+
+Con índice:  → va directo al registro en microsegundos
+```
+
+### 2. ¿Qué se guarda exactamente en ese nuevo espacio?
+El índice no duplica toda la tabla (eso sería un desperdicio de disco). El archivo del índice solo guarda dos cosas:
+
+- El valor de la columna indexada (en este caso, los emails), **pero perfectamente ordenados (usualmente en una estructura llamada B-Tree)**.
+
+- Un puntero (una dirección física en el disco llamada TID o Tuple ID) que le dice a Postgres: "El usuario con este email está en la fila X del archivo de la tabla".
+
+Por lo tanto, el índice ocupa un espacio extra en tu disco duro, pero suele ser mucho más pequeño que la tabla completa porque solo guarda una columna y su dirección.
+
+### 3. El costo de los índices
+Como el índice ocupa su propio espacio físico, debes tener en cuenta dos reglas de oro en el desarrollo profesional:
+
+- El espacio en disco crece: Si una tabla pesa 1 GB, y le creas 5 índices diferentes (uno por email, otro por edad, otro por nombre, etc.), esos archivos de índices podrían llegar a pesar otro 1 GB combinado. Tu base de datos ahora ocupa 2 GB en el disco duro.
+
+- Las escrituras se vuelven más lentas: Aquí está el verdadero peligro. Cada vez que haces un INSERT con Prisma para crear un usuario, o un UPDATE para cambiar un email, Postgres tiene que hacer el doble de trabajo: Escribir los datos en el archivo de la tabla e ir al archivo del índice, buscar la posición correcta de forma ordenada, y actualizar el índice.
+
+⚠️ Conclusión: **Los índices son mágicos para acelerar las búsquedas (SELECT)**, pero tienen un costo físico en espacio de disco duro y ralentizan las escrituras (INSERT/UPDATE). Por eso, la regla de oro es indexar únicamente las columnas que uses frecuentemente en tus filtros (como los WHERE o los ORDER BY de tus consultas).
+
+### ¿Qué columnas indexar?
+La regla es simple: **indexa las columnas por las que frecuentemente buscas o filtras.**
+```
+- Buscas usuarios por email FRECUENTEMENTE
+SELECT * FROM usuarios WHERE email = 'ana@mail.com'  ← indexa email
+
+- Buscas pedidos por usuario FRECUENTEMENTE  
+SELECT * FROM pedidos WHERE usuarioId = 1  ← indexa usuarioId
+
+- Ordenas por precio FRECUENTEMENTE
+SELECT * FROM pedidos ORDER BY precio  ← indexa precio
+```
+### Tipos de índices que debes conocer
+1. Índice normal --> acelera búsquedas en una columna:
+```
+CREATE INDEX idx_usuarios_ciudad ON usuarios(ciudad);
+```
+
+2. Índice único --> como el normal pero además garantiza que no hay duplicados. Ya usaste uno sin saberlo:
+```
+email String? @unique  -- esto crea un índice único en email
+```
+
+### ¿Cómo crear índices en Prisma?
+```
+model Usuario {
+  id       Int     @id @default(autoincrement())
+  nombre   String
+  ciudad   String
+  edad     Int
+  email    String? @unique
+  pedidos  Pedido[]
+
+  @@index([ciudad])        // índice en ciudad
+  @@index([ciudad, edad])  // índice compuesto — para buscar por ciudad Y edad
+}
+```
+
+### Resumen
+La pregunta fundamental de los índices sería, ¿cómo se optimiza una consulta (SELECT) lenta? la respuesta es: revisando si las columnas del WHERE tienen un índice.
+
+## Transacciones
+Una transacción es un grupo de operaciones que se ejecutan todas juntas o ninguna. Si algo falla en el medio todo se revierte como si nada hubiera pasado. Un ejemplo clásico es una transferencia bancaria:
+```
+Transferir $100 de Ana a Luis:
+
+1. Restar $100 de la cuenta de Ana
+2. Sumar $100 a la cuenta de Luis
+```
+¿Qué pasa si después del paso 1 se va la luz y el paso 2 nunca se ejecuta? Ana perdió $100 y Luis no recibió nada. Los datos quedaron corruptos. Con una transacción, si el paso 2 falla, el paso 1 se revierte automáticamente como si nunca hubiera ocurrido.
+
+### ACID, las 4 propiedades que garantiza una transacción:
+Estos términos los vas a escuchar en entrevistas:
+
+![alt text](image-1.png)
+
+### BEGIN / COMMIT / ROLLBACK — los comandos en SQL puro
+```
+BEGIN;  -- inicia la transacción
+
+UPDATE cuentas SET saldo = saldo - 100 WHERE usuario_id = 1;
+UPDATE cuentas SET saldo = saldo + 100 WHERE usuario_id = 2;
+
+COMMIT;  -- confirma todos los cambios
+```
+
+Si algo sale mal:
+```
+BEGIN;
+
+UPDATE cuentas SET saldo = saldo - 100 WHERE usuario_id = 1;
+-- ocurre un error aquí (se va la luz)
+
+ROLLBACK;  -- revierte todo, Ana recupera sus $100
+```
+
+### Transacciones con Prisma
+En este caso, simularemos un transacción correcta con Prisma:
+```
+async function main() {
+
+  try {
+    const resultado = await prisma.$transaction([
+      prisma.pedido.create({
+        data: { producto: 'laptop', precio: 999, usuarioId: 1 }
+      }),
+      prisma.pedido.create({
+        data: { producto: 'monitor', precio: 450, usuarioId: 1 }
+      })
+    ])
+    console.log('Transacción exitosa:', resultado)
+
+  } catch (error) { 
+    console.log('Transacción fallida — todo revertido:', error.message)
+  }
+}
+```
+
+Ahora simulemos una transacción que está destinada a fallar:
+```
+const {PrismaClient} = require('@prisma/client')
+const prisma = new PrismaClient()
+
+async function main() {
+
+  try {
+    const resultado = await prisma.$transaction([
+      prisma.pedido.create({
+        data: { producto: 'cámara', precio: 999, usuarioId: 1 }
+      }),
+      prisma.pedido.create({
+        data: { producto: 'monitor', precio: 450, usuarioId: 19 }  
+      })
+    ])
+    console.log('Transacción exitosa:', resultado)
+
+  } catch (error) {
+    console.log('Transacción fallida — todo revertido:', error.message)
+  }
+
+  const pedidos = await prisma.pedido.findMany()
+  console.log(pedidos);
+  
+}
+main()
+    .catch(console.error) // Volvemos a anexar el catch a la función, ya que tenemos codigo que puede fallar fuera del try y el catch
+    .finally(() => prisma.$disconnect())
+
+/* Con try/catch completo adentro → el .catch externo es redundante pero inofensivo. */
+```
+
+## SQL vs NoSQL: ¿cúal usar?
+"NoSQL" no significa "sin SQL", significa "Not Only SQL". No es un reemplazo de SQL, es una alternativa para casos específicos. 
+
+### La diferencia fundamental
+SQL guarda datos en tablas con estructura fija, todas las filas tienen las mismas columnas como ya lo hemos visto.
+
+NoSQL guarda datos como documentos JSON, cada documento puede tener una estructura diferente:
+```
+// MongoDB — colección usuarios
+{ "id": 1, "nombre": "Ana", "ciudad": "GYE", "edad": 28 } // Esto es un documento en NoSQL
+{ "id": 2, "nombre": "Luis", "ciudad": "UIO", "edad": 34, "telefono": "099..." }
+{ "id": 3, "nombre": "Sara", "redesSociales": { "instagram": "@sara", "twitter": "@sarita" } }
+```
+Como vemos, cada documento puede tener campos distintos osea no hay un molde fijo. MongoDB es la base de datos NoSQL más usada en el ecosistema Node.js. En lugar de tablas tiene colecciones, y en lugar de filas tiene documentos.
+
+### ¿Cúando usar cada uno?
+**Usa SQL (PostgreSQL) cuando:**
+
+- Tus datos tienen relaciones claras — usuarios, pedidos, productos
+- Necesitas transacciones ACID — pagos, transferencias, inventario
+- La estructura de tus datos es estable y no cambia mucho
+- Necesitas hacer consultas complejas con JOINs
+
+**Usa NoSQL (MongoDB) cuando:**
+
+- Tus datos **no tienen una estructura fija** — cada registro puede ser diferente
+- Necesitas escalar horizontalmente a millones de usuarios — redes sociales, apps de streaming
+- Guardas datos en formato JSON natural — logs, eventos, configuraciones
+- La velocidad de escritura masiva es crítica
+
+### Un ejemplo para entenderlo mejor
+Imagina que construyes una red social, donde lo mas probable, es que cada usuario tenga un perfil completamente diferente:
+```
+{ "nombre": "Ana", "bio": "Bióloga", "trabajo": "Cambridge University" }
+{ "nombre": "Luis", "bio": "Músico", "bandas": ["Los Rocks", "Jazz Club"], "spotify": "..." }
+{ "nombre": "Sara", "bio": "Dev", "github": "sara", "stack": ["JS", "Python", "Rust"] }
+```
+Como vemos cada perfil es ditinto. Ana comparte pocas cosas en común con Sara y con Luis. En ese caso, con SQL tendrías que crear columnas para todos los posibles campos por lo que la mayoría quedarían en NULL para la mayoría de usuarios. En MongoDB cada documento tiene exactamente los campos que necesita.
+
+
+
+
+
+
+
+
 
 
 
