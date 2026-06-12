@@ -17,6 +17,7 @@ model Usuario {
   nombre   String
   ciudad   String
   edad     Int
+  email    String?  @unique
   pedidos  Pedido[]
 }
 

@@ -6,10 +6,19 @@ const prisma = new PrismaClient()
 
 app.use(express.json())
 
-// GET - obtener todos los usuarios
+/* GET - obtener todos los usuarios. Para Express, /usuarios?pagina=1 y /usuarios son la misma ruta. El ?pagina=1 es un 
+query parameter, no forma parte de la ruta, es información adicional que va después del ? Como el query es información adicional
+del endpoint, no afecta el endpoint /usuarios. Esa información adicional es tomada opcionalmente por el query si es que existe.*/ 
 app.get('/usuarios', async (req, res) => {
-  const usuarios = await prisma.usuario.findMany()
-  res.json(usuarios)
+  const pagina = Number(req.query.pagina) || 1 // el query es informacion adicional que viaja en la URL del cliente.
+  const registros = 2
+
+  const usuarios = await prisma.usuario.findMany({
+    skip: (pagina - 1) * registros,
+    take: registros
+  })
+
+  res.json(usuarios) // CUIDADO a la hora de escribir endpoints iguales con las mismas peticiones (ej: GET) en nuestras API'S.
 })
 
 // GET - obtener un usuario por id
