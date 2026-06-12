@@ -440,8 +440,8 @@ En este caso, simularemos un transacción correcta con Prisma:
 ```
 async function main() {
 
-  try {
-    const resultado = await prisma.$transaction([
+  try { // El try identifica el error (si es que lo hay) y detiene la ejecución del resto del código.
+    const resultado = await prisma.$transaction([ // La transacción revierte el error
       prisma.pedido.create({
         data: { producto: 'laptop', precio: 999, usuarioId: 1 }
       }),
@@ -528,6 +528,134 @@ Imagina que construyes una red social, donde lo mas probable, es que cada usuari
 { "nombre": "Sara", "bio": "Dev", "github": "sara", "stack": ["JS", "Python", "Rust"] }
 ```
 Como vemos cada perfil es ditinto. Ana comparte pocas cosas en común con Sara y con Luis. En ese caso, con SQL tendrías que crear columnas para todos los posibles campos por lo que la mayoría quedarían en NULL para la mayoría de usuarios. En MongoDB cada documento tiene exactamente los campos que necesita.
+
+## SQL injection
+Es cuando un atacante mete código SQL malicioso dentro de un campo de texto y tu base de datos lo ejecuta como si fuera una consulta legítima. El ejemplo clásico es un formulario de login:
+```
+// ❌ Código vulnerable — construyes SQL con strings
+const email = req.body.email  // valor que viene del usuario
+const password = req.body.password
+
+const query = `SELECT * FROM usuarios 
+               WHERE email = '${email}' 
+               AND password = '${password}'`
+```
+Si el usuario escribe valores normales, la consulta queda bien:
+```
+SELECT * FROM usuarios 
+WHERE email = 'ana@mail.com' 
+AND password = '1234'
+```
+Pero si un atacante escribe esto en el campo email:
+```
+' OR '1'='1 --
+```
+La consulta queda así:
+```
+SELECT * FROM usuarios 
+WHERE email = '' OR '1'='1' --
+AND password = '1234' ← esto queda comentado (--), por lo que queda ignorado
+```
+'1'='1' es siempre verdadero, el atacante acaba de saltarse el login completamente sin saber ninguna contraseña. Tiene acceso a la cuenta de cualquier usuario.
+
+Un ataque más destructivo escribiría esto en el campo:
+```
+'; DROP TABLE usuarios; --
+```
+La consulta queda:
+```
+SELECT * FROM usuarios WHERE email = ''; 
+DROP TABLE usuarios; 
+-- ' AND password = '1234' ← toda esa línea queda comentada
+```
+Acaba de borrar toda tu tabla de usuarios. El -- comenta el resto de la consulta para que no cause error de sintaxis.
+
+### ¿Por qué Prisma te protege automáticamente?
+Cuando ejecutas este código en tu archivo index.js:
+```
+const usuario = await prisma.usuario.findUnique({
+  where: { email: req.body.email }
+})
+``` 
+Recuerdas que el PrismaClient es la clase que va a pasarle ese código a el motor de Prisma para que lo transforme en SQL y asi poderlo enviar a PostgreSQL para su posterior ejecución. En este caso, la forma con la que envía los datos el motor de Prisma es un poco mas compleja, ¿cómo lo hace? Prisma internamente prepara la consulta:
+```
+Motor de Prisma
+   │
+   ├── SQL:
+   │   SELECT * FROM usuarios WHERE email = $1 
+   │
+   └── Parámetros: El parámetro es lo que envía el usuario
+       ["' OR '1'='1"]
+            │
+            ▼
+       PostgreSQL
+
+$1 = "' OR '1'='1"
+```
+Como vemos en el esquema, Prisma primero envía la consulta SQL (a PostgreSQL) pero con un valor codificado en email (llamado placeholder) que es $1. Luego Prisma envía los parámetros, que son los valores que inyecta el usuario (en este caso una consulta maliciosa). A este proceso se le llama **consultas preparadas**.
+
+Hasta aquí puedes pensar que esa consulta maliciosa se va a ejecutar de la misma forma que se ejecuta si estuvieramos trabajando sin Prisma pero no es así. ¿Por qué? Porque PostgreSQL maneja esta información de forma diferente:
+
+Cuando Prisma le envia primero la consulta a PostgreSQL se quedará esperando el parámetro. En ese momento PostgreSQL dice esto: "Voy a comparar la columna email con un valor (parámetro) que recibiré después." Es decir, todavía no conoce el parámetro (valor). 
+
+Una vez que el motor de Prisma le envía el parámetro a PostgreSQL, él recibe el valor y dice: "Este parámetro es un string." Es decir, **no vuelve a interpretar el contenido como SQL**. Eso quiere decir, que interpretara el parámetro (consulta maliciosa) como un valor cualquiera (un string) y no como una consulta SQL. ¿Por qué? Porque PostgreSQL distingue entre consulta (código) y parámetros (datos). Sino pudiera hacer esta distinción entonces pasaría todo el tiempo ejecutando consultas (código) y no pudiera entender el valor de un registro o campo (ejemplo: 'casa'). Entonces PostgreSQL dice: "Debo buscar usuarios cuyo email sea exactamente el texto ' OR '1'='1." ".
+
+El SQL Injection funciona cuando el atacante logra que su texto sea interpretado como parte del código SQL. Esto ocurre cuando se usa SQL puro en JavaScript o en cualquier otro lenguaje de programación. Pero cuando usamos Prisma, éste aprovecha esa distinción de PostgreSQL entre consulta y parámetro, para poder enviar el código y el parámetro por separado. Internamente en PostgreSQL ocurre algo así:
+
+1. Parsea el SQL.
+2. Construye un plan de ejecución.
+3. Determina que $1 será un dato de tipo texto.
+4. Luego recibe el valor para $1.
+5. Sustituye el valor de forma segura durante la ejecución.
+
+Para PostgreSQL, el parámetro ya tiene un significado definido: "$1 es un valor de texto que debe compararse con la columna email." El valor de sus carácteres es insignificante.
+
+### ¿Cómo hacerlo de forma segura cuando escribo SQL crudo en Node.js?
+Cuando usas SQL crudo con concatenación de strings, algo que podrías hacer en Node.js sin ORM:
+
+Primero instalas la librería:
+```
+npm install pg
+```
+
+Luego continuas con el resto del código: 
+```
+const {client} = require('pg') // Importo la librería pg (que me va a comunicar con postgreSQL) y obtengo solamente la clase client.
+const db = new Client({  // la clase Client contiene varios métodos —— connect(), query(), end().
+  connectionString:  process.env.DATABASE_URL // Va al archivo .env a consultar los datos de mi database.
+}) 
+
+async function main() {
+  await db.connect() // Conectarse a PostgreSQL
+
+  // ✅ Seguro — consulta preparada
+  // El email va como parámetro separado, nunca dentro del string SQL
+  const email = 'anita@gmail.com'
+  const resultado = await db.query( // query() es el método que envía una consulta SQL a PostgreSQL y espera el resultado.
+    'SELECT * FROM "Usuario" WHERE email = $1', [email]
+  )
+
+  console.log('Usuario encontrado:', resultado.rows) // Mi variable resultado (que está arriba) accede al objeto rows. 
+  // rows en español significa filas. Te da el resultado en forma de filas
+
+  // Cerrar la conexión
+  await db.end()
+}
+
+main().catch(console.error)
+```
+En este caso, el driver de PostgreSQL (por ejemplo pg en Node.js) ve que hay placeholders ($1, $2) y envía la consulta y los parámetros por separado usando el protocolo de PostgreSQL. En el caso de que hubiera más placeholders, se vería así:
+
+```
+db.query(
+  'SELECT * FROM "Usuario" WHERE ciudad = $1 AND edad > $2',
+  ['Quito', 25]
+)
+```
+
+### Resumen
+Usar Prisma te protege automáticamente de SQL Injection porque nunca concatena strings para construir consultas. Pero es importante que entiendas por qué ya que en una entrevista es una pregunta muy común, y responder "Prisma usa consultas preparadas que separan el SQL de los datos" demuestra que entiendes el problema de fondo, no solo que usas una herramienta que lo resuelve por ti.
+
 
 
 
