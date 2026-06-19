@@ -656,7 +656,204 @@ db.query(
 ### Resumen
 Usar Prisma te protege automáticamente de SQL Injection porque nunca concatena strings para construir consultas. Pero es importante que entiendas por qué ya que en una entrevista es una pregunta muy común, y responder "Prisma usa consultas preparadas que separan el SQL de los datos" demuestra que entiendes el problema de fondo, no solo que usas una herramienta que lo resuelve por ti.
 
+## Seed (Semilla)
+Cuando recien creas una base de datos, aquella es como una maceta vacía. Un archivo seed es una semilla que vas a sembrar en esa maceta vacía: Un archivo con código que tiene como objetivo llenar tu base de datos con datos estructurales fijos o datos de prueba.
 
+### ¿Por qué es útil? 
+- Llenar rápido bases de datos vacías: Si estás creando una tienda online y quieres probar si la página de productos funciona, necesitas productos en la base de datos. Hacerlo a mano desde una interfaz es lento. El archivo semilla lo hace por ti en segundos.
+
+- Datos de prueba consistentes: Si obras en equipo, cada programador puede ejecutar el mismo archivo semilla para tener exactamente los mismos usuarios y productos de prueba en su computadora.
+
+- Datos por defecto: A veces una aplicación necesita datos para funcionar desde el día 1 (por ejemplo, un usuario "Admin" principal, o categorías básicas como "Tecnología", "Ropa", etc.). El seed se encarga de crearlos.
+
+### ¿Cómo se crea un archivo seed y cómo lo usamos en Prisma?
+1. Abre una cmd y navega a la carpeta de tu proyecto con cd.
+
+2. Escribe el comando type nul > seed.js (o también puedes usar echo. > seed.js) para crear un archivo .js en VScode.
+
+3. Ábrelo en VS Code ejecutando code seed.js para empezar a editarlo directamente.
+
+4. Crea el archivo seed. Puede ser algo así:
+```
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient();
+
+async function main() {
+  // Crear cursos
+  const curso1 = await prisma.curso.create({
+    data: {
+      nombre: "Biología General",
+      duracion_en_meses: 6,
+    },
+  })
+
+  const curso2 = await prisma.curso.create({
+    data: {
+      nombre: "Genética",
+      duracion_en_meses: 3,
+    },
+  })
+
+  const curso3 = await prisma.curso.create({
+    data: {
+      nombre: "Bioinformática",
+      duracion_en_meses: 5,
+    },
+  })
+
+  // Crear estudiantes enlazados a cursos
+  await prisma.estudiante.create({
+    data: {
+      nombre: "Mario",
+      edad: 24,
+      email: "mario@email.com",
+      cursos: {
+        connect: [{ id: curso1.id }],
+      },
+    },
+  })
+
+  await prisma.estudiante.create({
+    data: {
+      nombre: "Marta",
+      edad: 33,
+      email: "marta@email.com",
+      cursos: {
+        connect: [{ id: curso1.id }, { id: curso2.id }],
+      },
+    },
+  })
+
+  await prisma.estudiante.create({
+    data: {
+      nombre: "Luis",
+      edad: 31,
+      email: "carlos@email.com",
+      cursos: {
+        connect: [{ id: curso2.id }, { id: curso3.id }],
+      },
+    },
+  })
+
+  await prisma.estudiante.create({
+    data: {
+        nombre: "Angela",
+        edad: 25,
+        email: "angela@email.com",
+        cursos: {
+            connect: [{ id: curso1.id}, { id: curso2.id}, {id: curso3.id}]
+        }
+    }
+  })
+
+  console.log("Seed completado con éxito");
+}
+
+main()
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
+```
+
+5. Coloca el archivo en prisma/seed.js
+
+6. Agrega esto en tu package.json:
+```
+"prisma": {
+  "seed": "node prisma/seed.js"
+}
+```
+
+7. Córrelo cuando desees:
+```
+npx prisma db seed
+```
+Veamos el significado de ese comando:
+
+`npx`: Ejecutor de paquetes de Node.js, te permite correr herramientas instaladas en node_modules sin instalarlas globalmente.
+
+`prisma`: El CLI de Prisma que estás invocando.
+
+`db`: Subcomando que agrupa operaciones relacionadas a la base de datos.
+
+`seed`: Esta es la operación específica, que es ejecutar el archivo seed configurado en tu proyecto.
+
+Cuando corres `npx prisma db seed`, Prisma busca en tu `package.json` la sección "prisma" para saber qué archivo ejecutar como seed. Sin esa línea, Prisma no sabe dónde está tu seed y lanza un error. Imagina que `package.json` es el manual de instrucciones de tu proyecto. Cualquier herramienta (Prisma, npm, etc.) que llegue a tu proyecto lo lee para saber cómo funciona todo. La sección "prisma" es la página del manual dedicada a Prisma.
+
+## BackUp (respaldo)
+Es una copia de tus datos guardada en un lugar separado, para poder restaurarlos si algo sale mal. 
+
+### ¿Por qué existe?
+Los datos pueden perderse por muchas razones:
+
+- Error humano (alguien borra algo sin querer).
+- Fallo de hardware (disco duro muerto).
+- Ataque (ransomware que cifra tu base de datos).
+- Bug en el código (una migración mal escrita que destruye datos).
+
+### En el contexto de base de datos
+Un backup de PostgreSQL, por ejemplo, es un archivo que contiene toda la estructura y datos de tu base en un momento específico. Puedes generarlo así en la cmd:
+```
+pg_dump -U postgres nombre_db > backup.sql
+```
+Veamos el significado del comando:
+- `pg_dump`: El programa de PostgreSQL que hace el volcado de datos.
+
+- `-U`: Flag que significa "User", le dice a pg_dump que el siguiente argumento es el usuario.
+
+- `postgres`: El nombre del usuario de PostgreSQL con el que se conecta.
+
+- `nombre_db`: El nombre de tu base de datos a respaldar.
+
+- `>`: Operador del sistema operativo que redirige la salida hacia un archivo (en lugar de imprimir en pantalla).
+
+- `backup.sql`: El archivo donde se guarda el resultado. El nombre lo decides tú.
+
+Y restaurarlo así:
+```
+psql -U postgres nombre_db < backup.sql
+```
+Veamos el significado del comando:
+- `psql`: El cliente de PostgreSQL (con el que ejecutas consultas SQL).
+
+- `-U`: Especifica el usuario.
+
+- `postgres`: El usuario de PostgreSQL.
+
+- `nombre_db`: La base de datos donde vas a restaurar los datos.
+
+- `<`: Operador del SO opuesto a >, toma el contenido del archivo y lo manda como entrada al comando.
+
+- `backup.sql`: El archivo de backup que creaste antes.
+
+La diferencia clave entre `>` y `<` es la dirección del flujo:
+
+- `>` fluye hacia el archivo (escribir)
+- `<` fluye desde el archivo (leer)
+
+### Conceptos clave
+```
+Concepto     |  Significado
+―――――――――――――|―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――             
+Frecuencia   |  Cada cuánto haces el backup (diario, por hora, etc.)
+             |
+Retención    |  Cuánto tiempo guardas los backups anteriores
+             |
+Ubicación    |  Debe estar en un lugar distinto al original (otro servidor, la nube)
+             |
+Restauración |  El backup no vale nada si nunca lo has probado restaurando
+```
+
+### Regla clásica para backups: 3-2-1
+- 3 copias de tus datos
+- en 2 tipos de almacenamiento distintos
+- con 1 copia fuera del sitio (offsite)
+
+**En producción, los backups son innegociables. Es lo primero que configuras antes de que usuarios reales empiecen a usar el sistema.**
 
 
 
