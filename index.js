@@ -2,8 +2,10 @@ const express = require('express')
 const { PrismaClient } = require('@prisma/client')
 
 const app = express()
+const cors = require("cors")
 const prisma = new PrismaClient()
 
+app.use(cors())
 app.use(express.json())
 
 /* GET - obtener todos los usuarios. Para Express, /usuarios?pagina=1 y /usuarios son la misma ruta. El ?pagina=1 es un 

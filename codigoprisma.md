@@ -143,7 +143,7 @@ Esto significa:
 Con esos seis métodos ya puedes construir la mayor parte del backend de una aplicación CRUD, como una tienda de bicicletas, un blog, una API de usuarios o un sistema de inventario. Ahora veamos algunas consultas mas avanzadas traducidas en JavaScript:
 
 ### Include
-Este metodo es el equivalente a INNER JOIN en sql. Te va a permitir devolver los valores de ambas tablas, simepre que haya algo que las una, en este caso, será la PK y FK descrita en el archivo schema.prisma. Se escribiría de la siguiente forma:
+Este metodo es el equivalente a INNER JOIN en sql. Te va a permitir devolver los valores de ambas tablas, siempre que haya algo que las una, en este caso, será la PK y FK descrita en el archivo schema.prisma. Se escribiría de la siguiente forma:
 ```
 async function main() {
 
@@ -667,11 +667,11 @@ Cuando recien creas una base de datos, aquella es como una maceta vacía. Un arc
 - Datos por defecto: A veces una aplicación necesita datos para funcionar desde el día 1 (por ejemplo, un usuario "Admin" principal, o categorías básicas como "Tecnología", "Ropa", etc.). El seed se encarga de crearlos.
 
 ### ¿Cómo se crea un archivo seed y cómo lo usamos en Prisma?
-1. Abre una cmd y navega a la carpeta de tu proyecto con cd.
+1. Abre una cmd y navega a la carpeta de tu proyecto con el comando `cd`.
 
-2. Escribe el comando type nul > seed.js (o también puedes usar echo. > seed.js) para crear un archivo .js en VScode.
+2. Escribe el comando `type nul > seed.js` (o también puedes usar `echo. > seed.js`) para crear un archivo `.js` en VScode.
 
-3. Ábrelo en VS Code ejecutando code seed.js para empezar a editarlo directamente.
+3. Ábrelo en VS Code ejecutando `code seed.js` para empezar a editarlo directamente.
 
 4. Crea el archivo seed. Puede ser algo así:
 ```
@@ -759,16 +759,16 @@ main()
   })
 ```
 
-5. Coloca el archivo en prisma/seed.js
+5. Coloca el archivo `seed.js` en tu carpeta `prisma`. Una vez colocado el archivo, esa carpeta tendrá la ruta `prisma/seed.js`
 
-6. Agrega esto en tu package.json:
+6. Agrega esto en tu archivo `package.json`:
 ```
 "prisma": {
   "seed": "node prisma/seed.js"
 }
 ```
 
-7. Córrelo cuando desees:
+7. Corre tu archivo `seed.js` cuando desees:
 ```
 npx prisma db seed
 ```
