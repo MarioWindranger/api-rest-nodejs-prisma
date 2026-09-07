@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_URL } from "./config";
 
 function FormularioUsuario({ onUsuarioCreado }) {
   const [formulario, setFormulario] = useState({
@@ -20,7 +21,7 @@ function FormularioUsuario({ onUsuarioCreado }) {
 
     setEnviando(true);
 
-    const respuesta = await fetch("http://localhost:3000/usuarios", {
+    const respuesta = await fetch(`${API_URL}/usuarios`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

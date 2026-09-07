@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import TarjetaUsuario from "./TarjetaUsuario";
 import FormularioUsuario from "./formulario";
+import { API_URL } from "./config";
 
 function ListaUsuarios() {
   const [usuarios, setUsuarios] = useState([]);
@@ -11,7 +12,7 @@ function ListaUsuarios() {
   useEffect(() => {
     setCargando(true);
 
-    fetch(`http://localhost:3000/usuarios?pagina=${pagina}`)
+    fetch(`${API_URL}/usuarios?pagina=${pagina}`)
       .then(res => {
         if (!res.ok) throw new Error("Error al obtener usuarios");
         return res.json();
