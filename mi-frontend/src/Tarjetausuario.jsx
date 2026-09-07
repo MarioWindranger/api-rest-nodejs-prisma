@@ -10,3 +10,5 @@ function TarjetaUsuario({nombre, ciudad, edad, email}) {
     );
 } 
 export default TarjetaUsuario;
+
+/* React hace el llamado automático de los componentes hijos cuando lee el componente padre que los contiene. */
